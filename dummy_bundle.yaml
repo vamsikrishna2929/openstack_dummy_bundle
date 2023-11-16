@@ -7,8 +7,8 @@ variables:
   openstack-origin:    &openstack-origin    distro
   worker-multiplier:   &worker-multiplier   0.25
   openstack-region:    &openstack-region    chnsirslv
-  dns-domain:          &dns-domain          silver.npcitech.io.
-  designate-ns:        &designate-ns        ns1.silver.npcitech.io.
+  dns-domain:          &dns-domain          silver.demostack.io.
+  designate-ns:        &designate-ns        ns1.silver.demostack.io.
    # need to confirm about dns forwarders
   designate-fwd:       &designate-fwd       "192.168.1.1;192.168.1.2"
   # Juju spaces
