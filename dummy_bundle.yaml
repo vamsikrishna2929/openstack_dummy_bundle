@@ -1,0 +1,582 @@
+local_overlay_enabled: true
+series: focal
+# *** Please refer to the OpenStack Charms Deployment Guide for more        ***
+# *** information.
+# *** https://docs.openstack.org/project-deploy-guide/charm-deployment-guide **
+variables:
+  openstack-origin:    &openstack-origin    distro
+  worker-multiplier:   &worker-multiplier   0.25
+  openstack-region:    &openstack-region    chnsirslv
+  dns-domain:          &dns-domain          silver.npcitech.io.
+  designate-ns:        &designate-ns        ns1.silver.npcitech.io.
+   # need to confirm about dns forwarders
+  designate-fwd:       &designate-fwd       "192.168.1.1;192.168.1.2"
+  # Juju spaces
+  storage-space:       &storage-space       storage-space
+  admin-space:         &admin-space         admin-space
+  public-space:        &public-space        admin-space
+  internal-space:      &internal-space      internal-api-space
+  storage-mgmt-space:  &storage-mgmt-space  storage-mgmt-space
+  tenant-space:        &tenant-space        parking-space
+
+  # Neutron bridge mappings.
+  flat-network-providers:     &flat-network-providers     "physnet1"
+  vlan-ranges:                &vlan-ranges                "physnet1:2:4094"
+  data-port:                  &data-port                  br-ex:prov_bond
+  bridge-mappings:            &bridge-mappings            physnet1:br-ex
+  cinder-block-device:        &cinder-block-device        None
+
+  ############################################################
+  # change vips as per environment, try to keep same last octet.
+  dashboard-vip:        &dashboard-vip          "192.168.1.1"
+  glance-vip:           &glance-vip             "192.168.1.2 192.168.3.1"
+  keystone-vip:         &keystone-vip           "192.168.1.3 192.168.3.2"
+  vault-vip:            &vault-vip              "192.168.1.4"
+  neutron-api-vip:      &neutron-api-vip        "192.168.1.5 192.168.3.4"
+  cinder-vip:           &cinder-vip             "192.168.1.6 192.168.3.6"
+  placement:            &placement-vip          "192.168.1.7 192.168.3.7"
+  heat-vip:             &heat-vip               "192.168.1.8 192.168.3.9"
+  nova-cc-vip:          &nova-cc-vip            "192.168.1.9 192.168.3.0"
+  # Need to confirm below vips availablity.
+  designate-vip:        &designate-vip          "192.168.1.1 192.168.3.1"
+
+  ############################################################
+machines:
+  '0':
+          #constraints: "tags=controller-1 zones=default"
+  '1':
+          #constraints: "tags=controller-2 zones=silver"
+  '2':
+          #constraints: "tags=controller-3 zones=silver"
+  '3':
+          #constraints: "tags=compute-1 zones=silver"
+
+applications:
+#HAclusters
+  cinder-hacluster:
+    charm: cs:hacluster
+  glance-hacluster:
+    charm: cs:hacluster
+  keystone-hacluster:
+    charm: cs:hacluster
+  nova-cloud-controller-hacluster:
+    charm: cs:hacluster
+  placement-hacluster:
+    charm: cs:hacluster
+  vault-hacluster:
+    charm: cs:hacluster
+  neutron-api-hacluster:
+    charm: cs:hacluster
+  openstack-dashboard-hacluster:
+    charm: cs:hacluster
+  heat-hacluster:
+    charm: cs:hacluster
+  designate-hacluster:
+    charm: cs:hacluster
+# MySql Routers
+  cinder-mysql-router:
+    charm: cs:mysql-router-35
+  glance-mysql-router:
+    charm: cs:mysql-router-35
+    options:
+      base-port: 3316
+  keystone-mysql-router:
+    charm: cs:mysql-router-35
+  nova-mysql-router:
+    charm: cs:mysql-router-35
+  placement-mysql-router:
+    charm: cs:mysql-router-35
+  vault-mysql-router:
+    charm: cs:mysql-router-35
+  neutron-mysql-router:
+    charm: cs:mysql-router-35
+  dashboard-mysql-router:
+    charm: cs:mysql-router-35
+  heat-mysql-router:
+    charm: cs:mysql-router-35
+  designate-mysql-router:
+    charm: cs:mysql-router-35
+
+  mysql-innodb-cluster:
+    charm: 'ch:mysql-innodb-cluster'
+    channel: 8.0/stable
+    revision: 15
+    num_units: 3
+    options:
+      max-connections: 8192
+    bindings:
+      "": *admin-space
+    to:
+    - 'lxd:0'
+    - 'lxd:1'
+    - 'lxd:2'
+
+  memcached:
+    charm: 'cs:memcached-32'
+    num_units: 3
+    options:
+      allow-ufw-ip6-softfail: True
+    to:
+    - 'lxd:0'
+    - 'lxd:1'
+    - 'lxd:2'
+    bindings:
+      "": *admin-space
+
+  cinder:
+    charm: ./charm_store/cinder
+    num_units: 3
+    options:
+      enabled-services: api, scheduler
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      block-device: *cinder-block-device
+      glance-api-version: 2
+      vip: *cinder-vip
+      region: *openstack-region
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+      storage-backend: *storage-mgmt-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  cinder-volume:
+    charm: ./charm_store/cinder
+    num_units: 3
+    options:
+      enabled-services: volume
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      block-device: *cinder-block-device
+      glance-api-version: 2
+      region: *openstack-region
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+      storage-backend: *storage-mgmt-space
+      ceph: *storage-space
+    to:
+      - 0
+      - 1
+      - 2
+
+  glance:
+    charm: ./charm_store/glance
+    num_units: 3
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      vip: *glance-vip
+      restrict-ceph-pools: False
+      region: *openstack-region
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+      storage-backend: *storage-mgmt-space
+      ceph: *storage-space
+    to:
+      - '0'
+      - '1'
+      - '2'
+
+  keystone:
+    charm: 'cs:keystone-325'
+    num_units: 3
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      vip: *keystone-vip
+      region: *openstack-region
+      preferred-api-version: 3
+      token-provider: 'fernet'
+      token-expiration: 86400
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  heat:
+    charm: cs:heat-281
+    num_units: 3
+    to:
+    - 'lxd:0'
+    - 'lxd:1'
+    - 'lxd:2'
+    options:
+      vip: *heat-vip
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+
+  neutron-api:
+    charm: cs:neutron-api-294
+    num_units: 3
+    to:
+    - lxd:0
+    - lxd:1
+    - lxd:2
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      region: *openstack-region
+      flat-network-providers: *flat-network-providers
+      vlan-ranges: *vlan-ranges
+      neutron-security-groups: True
+      overlay-network-type: ""
+      vip: *neutron-api-vip
+      enable-l3ha: True
+      dhcp-agents-per-network: 2
+      enable-ml2-port-security: True
+      l2-population: False
+      enable-ml2-dns: True
+      dns-domain: *dns-domain
+      reverse-dns-lookup: True
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+
+  neutron-api-plugin-ovn:
+    charm: 'cs:neutron-api-plugin-ovn-6'
+    num_units: 0
+
+  designate:
+    charm: cs:designate-60
+    num_units: 3
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      nameservers: *designate-ns
+      use-internal-endpoints: True
+      vip: *designate-vip
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+    to:
+      - lxd:0
+      - lxd:1
+      - lxd:2
+
+  designate-bind:
+    charm: cs:designate-bind
+    num_units: 3
+    bindings:
+      "": *admin-space
+    options:
+      forwarders: *designate-fwd
+      recursion: true
+      use-internal-endpoints: True
+    to:
+      - lxd:0
+      - lxd:1
+      - lxd:2
+
+  ovn-central:
+    charm: 'cs:ovn-central-7'
+    bindings:
+      "": *admin-space
+    num_units: 3
+    options:
+      source: *openstack-origin
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  ovn-chassis:
+    charm: 'cs:ovn-chassis-14'
+    bindings:
+      "": *admin-space
+      data: *tenant-space
+    options:
+      bridge-interface-mappings: *data-port
+      ovn-bridge-mappings: *bridge-mappings
+
+  nova-cloud-controller:
+    charm: 'cs:nova-cloud-controller-355'
+    num_units: 3
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      network-manager: Neutron
+      region: *openstack-region
+      vip: *nova-cc-vip
+      console-access-protocol: spice
+      console-proxy-ip: local
+      # use-internal-endpoints: True
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  nova-compute:
+    charm: 'cs:nova-compute-327'
+    num_units: 1
+    options:
+      openstack-origin: *openstack-origin
+      enable-live-migration: True
+      enable-resize: True
+      migration-auth-type: ssh
+      use-internal-endpoints: True
+      libvirt-image-backend: qcow2
+      restrict-ceph-pools: False
+      aa-profile-mode: enforce
+      virt-type: kvm
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+      secrets-storage: *storage-space
+    to:
+      - 3
+
+  placement:
+    charm: 'cs:placement-32'
+    num_units: 3
+    options:
+      worker-multiplier: *worker-multiplier
+      openstack-origin: *openstack-origin
+      region: *openstack-region
+      vip: *placement-vip
+    bindings:
+      "": *admin-space
+      internal: *internal-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  openstack-dashboard:
+    charm: 'cs:openstack-dashboard-313'
+    num_units: 3
+    options:
+      openstack-origin: *openstack-origin
+      vip: *dashboard-vip
+      neutron-network-l3ha: True
+      neutron-network-lb: True
+      neutron-network-firewall: False
+      cinder-backup: False
+      password-retrieve: True
+    bindings:
+      "": *admin-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  rabbitmq-server:
+    charm: 'cs:rabbitmq-server-110'
+    bindings:
+      "": *admin-space
+    num_units: 3
+    options:
+      source: *openstack-origin
+      min-cluster-size: 3
+      ssl_enabled: false
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  vault:
+    charm: 'cs:vault-48'
+    num_units: 3
+    options:
+      vip: *vault-vip
+    bindings:
+      "": *admin-space
+    to:
+      - 'lxd:0'
+      - 'lxd:1'
+      - 'lxd:2'
+
+  easyrsa:
+    charm: cs:~containers/easyrsa-345
+    num_units: 1
+    to:
+    - 'lxd:0'
+    bindings:
+      "": *admin-space
+
+  etcd:
+    charm: cs:etcd-553
+    num_units: 3
+    to:
+    - 'lxd:0'
+    - 'lxd:1'
+    - 'lxd:2'
+    bindings:
+      "": *admin-space
+
+  ntp:
+    charm: cs:ntp-45
+    num_units: 0
+
+relations:
+  - - glance:identity-service
+    - keystone:identity-service
+  - - neutron-api:identity-service
+    - keystone:identity-service
+  - - neutron-api:amqp
+    - rabbitmq-server:amqp
+  - - glance:amqp
+    - rabbitmq-server:amqp
+  - - openstack-dashboard:identity-service
+    - keystone:identity-service
+  - - placement:identity-service
+    - keystone:identity-service
+  - - keystone:shared-db
+    - keystone-mysql-router:shared-db
+  - - glance:shared-db
+    - glance-mysql-router:shared-db
+  - - glance-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - neutron-api:shared-db
+    - neutron-mysql-router:shared-db
+  - - openstack-dashboard:shared-db
+    - dashboard-mysql-router:shared-db
+  - - placement:shared-db
+    - placement-mysql-router:shared-db
+  - - vault:shared-db
+    - vault-mysql-router:shared-db
+  - - keystone-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - nova-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - neutron-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - dashboard-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - placement-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - vault-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - neutron-api-plugin-ovn:neutron-plugin
+    - neutron-api:neutron-plugin-api-subordinate
+  - - ovn-central:certificates
+    - vault:certificates
+  - - ovn-central:ovsdb-cms
+    - neutron-api-plugin-ovn:ovsdb-cms
+  - - neutron-api:certificates
+    - vault:certificates
+  - - vault:certificates
+    - neutron-api-plugin-ovn:certificates
+  - - vault:certificates
+    - glance:certificates
+  - - vault:certificates
+    - keystone:certificates
+  - - vault:certificates
+    - openstack-dashboard:certificates
+  - - vault:certificates
+    - placement:certificates
+  - - vault:certificates
+    - mysql-innodb-cluster:certificates
+  - - vault:ha
+    - vault-hacluster:ha
+  - - vault:shared-db
+    - mysql-innodb-cluster:shared-db
+  - - etcd:db
+    - vault:etcd
+  - - etcd:certificates
+    - easyrsa:client
+  - - openstack-dashboard-hacluster:ha
+    - openstack-dashboard:ha
+  - - placement-hacluster:ha
+    - placement:ha
+  - - neutron-api-hacluster:ha
+    - neutron-api:ha
+  - - glance-hacluster:ha
+    - glance:ha
+  - - keystone-hacluster:ha
+    - keystone:ha
+  - - nova-compute:image-service
+    - glance:image-service
+  - - nova-compute:amqp
+    - rabbitmq-server:amqp
+  - - ntp:juju-info
+    - nova-compute:juju-info
+  - - nova-cloud-controller-hacluster:ha
+    - nova-cloud-controller:ha
+  - - nova-cloud-controller:identity-service
+    - keystone:identity-service
+  - - nova-cloud-controller:image-service
+    - glance:image-service
+  - - nova-cloud-controller:amqp
+    - rabbitmq-server:amqp
+  - - nova-cloud-controller:neutron-api
+    - neutron-api:neutron-api
+  - - nova-cloud-controller:certificates
+    - vault:certificates
+  - - nova-cloud-controller:placement
+    - placement:placement
+  - - nova-cloud-controller:shared-db
+    - nova-mysql-router:shared-db
+  - - nova-cloud-controller:memcache
+    - memcached:cache
+  - - nova-compute:cloud-compute
+    - nova-cloud-controller:cloud-compute
+  - - heat-hacluster:ha
+    - heat:ha
+  - - heat:identity-service
+    - keystone:identity-service
+  - - heat:certificates
+    - vault:certificates
+  - - heat:amqp
+    - rabbitmq-server:amqp
+  - - heat:shared-db
+    - heat-mysql-router:shared-db
+  - - heat-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - cinder-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - cinder-hacluster:ha
+    - cinder:ha
+  - - cinder:amqp
+    - rabbitmq-server:amqp
+  - - cinder:image-service
+    - glance:image-service
+  - - cinder:shared-db
+    - cinder-mysql-router:shared-db
+  - - cinder:identity-service
+    - keystone:identity-service
+  - - cinder:certificates
+    - vault:certificates
+  - - cinder:cinder-volume-service
+    - nova-cloud-controller:cinder-volume-service
+  - - cinder-volume:shared-db
+    - mysql-innodb-cluster:shared-db
+  - - cinder-volume:amqp
+    - rabbitmq-server:amqp
+  - - ovn-chassis:certificates
+    - vault:certificates
+  - - ovn-chassis:ovsdb
+    - ovn-central:ovsdb
+  - - ovn-chassis:nova-compute
+    - nova-compute:neutron-plugin
+  - - designate:identity-service
+    - keystone:identity-service
+  - - designate:shared-db
+    - mysql-innodb-cluster:shared-db
+  - - designate:amqp
+    - rabbitmq-server:amqp
+  - - designate:dns-backend
+    - designate-bind:dns-backend
+  - - designate:coordinator-memcached
+    - memcached:cache
+  - - designate:dnsaas
+    - neutron-api:external-dns
+  - - designate-hacluster:ha
+    - designate:ha
+  - - designate:shared-db
+    - designate-mysql-router:shared-db
+  - - designate-mysql-router:db-router
+    - mysql-innodb-cluster:db-router
+  - - designate:certificates
+    - vault:certificates
