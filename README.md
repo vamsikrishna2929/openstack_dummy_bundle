@@ -1,7 +1,5 @@
 # openstack_dummy_bundle
 
-deployment flow
-
 DEPLOYMENT FLOW: 
 
 
